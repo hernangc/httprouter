@@ -12,6 +12,14 @@ type Application struct {
 	pathMethodHandlerMap map[string]methodHandlerMap
 }
 
+func NewApplication(mux *http.ServeMux, mws ...Middleware) WebApplication {
+	return &Application{
+		mux:                  mux,
+		mws:                  mws,
+		pathMethodHandlerMap: make(map[string]methodHandlerMap),
+	}
+}
+
 func (a *Application) Group(path string, mws ...Middleware) WebApplication {
 	return &ApplicationGroup{
 		a:    a,
@@ -20,12 +28,24 @@ func (a *Application) Group(path string, mws ...Middleware) WebApplication {
 	}
 }
 
-func NewApplication(mux *http.ServeMux, mws ...Middleware) WebApplication {
-	return &Application{
-		mux:                  mux,
-		mws:                  mws,
-		pathMethodHandlerMap: make(map[string]methodHandlerMap),
-	}
+func (a *Application) Post(path string, handler http.Handler, mws ...Middleware) {
+	a.handle(http.MethodPost, path, handler, mws...)
+}
+
+func (a *Application) Get(path string, handler http.Handler, mws ...Middleware) {
+	a.handle(http.MethodGet, path, handler, mws...)
+}
+
+func (a *Application) Put(path string, handler http.Handler, mws ...Middleware) {
+	a.handle(http.MethodPut, path, handler, mws...)
+}
+
+func (a *Application) Patch(path string, handler http.Handler, mws ...Middleware) {
+	a.handle(http.MethodPatch, path, handler, mws...)
+}
+
+func (a *Application) Delete(path string, handler http.Handler, mws ...Middleware) {
+	a.handle(http.MethodDelete, path, handler, mws...)
 }
 
 func (a *Application) WithGlobalMiddlewares(mws ...Middleware) WebApplication {
@@ -73,24 +93,4 @@ func (a *Application) applyMiddleware(handler http.Handler, mws ...Middleware) h
 		handler = mws[i](handler)
 	}
 	return handler
-}
-
-func (a *Application) Post(path string, handler http.Handler, mws ...Middleware) {
-	a.handle(http.MethodPost, path, handler, mws...)
-}
-
-func (a *Application) Get(path string, handler http.Handler, mws ...Middleware) {
-	a.handle(http.MethodGet, path, handler, mws...)
-}
-
-func (a *Application) Put(path string, handler http.Handler, mws ...Middleware) {
-	a.handle(http.MethodPut, path, handler, mws...)
-}
-
-func (a *Application) Patch(path string, handler http.Handler, mws ...Middleware) {
-	a.handle(http.MethodPatch, path, handler, mws...)
-}
-
-func (a *Application) Delete(path string, handler http.Handler, mws ...Middleware) {
-	a.handle(http.MethodDelete, path, handler, mws...)
 }
