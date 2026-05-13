@@ -12,9 +12,18 @@ type Application struct {
 	pathMethodHandlerMap map[string]methodHandlerMap
 }
 
-func NewApplication(mux *http.ServeMux) WebApplication {
+func (a *Application) Group(path string, mws ...Middleware) WebApplication {
+	return &ApplicationGroup{
+		a:    a,
+		mws:  mws,
+		path: path,
+	}
+}
+
+func NewApplication(mux *http.ServeMux, mws ...Middleware) WebApplication {
 	return &Application{
 		mux:                  mux,
+		mws:                  mws,
 		pathMethodHandlerMap: make(map[string]methodHandlerMap),
 	}
 }
@@ -28,8 +37,6 @@ func (a *Application) handle(method string, path string, handler http.Handler, m
 	if a.pathMethodHandlerMap[path] == nil {
 		a.pathMethodHandlerMap[path] = make(methodHandlerMap)
 
-		a.pathMethodHandlerMap[path][method] = a.middleware(handler, mws...)
-
 		a.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			pMH := a.pathMethodHandlerMap[path]
 			if h, ok := pMH[r.Method]; ok {
@@ -40,6 +47,7 @@ func (a *Application) handle(method string, path string, handler http.Handler, m
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		})
 	}
+	a.pathMethodHandlerMap[path][method] = a.middleware(handler, mws...)
 }
 
 func (a *Application) allowedMethods(path string) string {
