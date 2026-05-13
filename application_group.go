@@ -50,5 +50,8 @@ func (g *ApplicationGroup) WithGlobalMiddlewares(mws ...Middleware) WebApplicati
 }
 
 func (g *ApplicationGroup) group(path string, handler http.Handler, mws ...Middleware) (string, http.Handler, []Middleware) {
-	return pth.Join(g.path, path), handler, append(g.mws, mws...)
+	allMws := make([]Middleware, 0, len(g.mws)+len(mws))
+	allMws = append(allMws, g.mws...)
+	allMws = append(allMws, mws...)
+	return pth.Join(g.path, path), handler, allMws
 }
