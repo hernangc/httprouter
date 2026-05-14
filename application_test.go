@@ -11,8 +11,9 @@ import (
 )
 
 // Helper for creating a string result handler
-func stringHandler(body string) http.HandlerFunc {
+func stringHandler(body string, statusCode int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(statusCode)
 		_, err := w.Write([]byte(body))
 		if err != nil {
 			panic(err)
@@ -35,11 +36,11 @@ func TestApplication_HandleMethods(t *testing.T) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
 
-	app.Get("/test", stringHandler("GET"))
-	app.Post("/test", stringHandler("POST"))
-	app.Put("/test", stringHandler("PUT"))
-	app.Patch("/test", stringHandler("PATCH"))
-	app.Delete("/test", stringHandler("DELETE"))
+	app.Get("/test", stringHandler("GET", http.StatusOK))
+	app.Post("/test", stringHandler("POST", http.StatusCreated))
+	app.Put("/test", stringHandler("PUT", http.StatusBadRequest))
+	app.Patch("/test", stringHandler("PATCH", http.StatusUnauthorized))
+	app.Delete("/test", stringHandler("DELETE", http.StatusAccepted))
 
 	tests := []struct {
 		method         string
@@ -47,10 +48,10 @@ func TestApplication_HandleMethods(t *testing.T) {
 		expectedBody   string
 	}{
 		{"GET", http.StatusOK, "GET"},
-		{"POST", http.StatusOK, "POST"},
-		{"PUT", http.StatusOK, "PUT"},
-		{"PATCH", http.StatusOK, "PATCH"},
-		{"DELETE", http.StatusOK, "DELETE"},
+		{"POST", http.StatusCreated, "POST"},
+		{"PUT", http.StatusBadRequest, "PUT"},
+		{"PATCH", http.StatusUnauthorized, "PATCH"},
+		{"DELETE", http.StatusAccepted, "DELETE"},
 		{"OPTIONS", http.StatusMethodNotAllowed, "Method Not Allowed\n"},
 	}
 
@@ -78,22 +79,22 @@ func TestApplication_MiddlewareOrder(t *testing.T) {
 	app := NewApplication(mux)
 
 	var called []string
-	mw1 := func(next http.HandlerFunc) http.HandlerFunc {
+	mw1 := func(next http.Handler) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			called = append(called, "mw1")
-			next(w, r)
+			next.ServeHTTP(w, r)
 		}
 	}
-	mw2 := func(next http.HandlerFunc) http.HandlerFunc {
+	mw2 := func(next http.Handler) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			called = append(called, "mw2")
-			next(w, r)
+			next.ServeHTTP(w, r)
 		}
 	}
 
-	app.Get("/mw", func(w http.ResponseWriter, r *http.Request) {
+	app.Get("/mw", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = append(called, "handler")
-	}, mw1, mw2)
+	}), mw1, mw2)
 
 	req := httptest.NewRequest("GET", "/mw", nil)
 	rr := httptest.NewRecorder()
@@ -113,8 +114,8 @@ func TestApplication_MiddlewareOrder(t *testing.T) {
 func TestApplication_AllowedMethodsHeader(t *testing.T) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
-	app.Get("/foo", stringHandler("bar"))
-	app.Post("/foo", stringHandler("baz"))
+	app.Get("/foo", stringHandler("bar", http.StatusOK))
+	app.Post("/foo", stringHandler("baz", http.StatusOK))
 
 	req := httptest.NewRequest("DELETE", "/foo", nil)
 	rr := httptest.NewRecorder()
@@ -133,8 +134,8 @@ func TestApplication_AllowedMethodsHeader(t *testing.T) {
 func TestApplication_MultipleRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
-	app.Get("/route1", stringHandler("route1"))
-	app.Get("/route2", stringHandler("route2"))
+	app.Get("/route1", stringHandler("route1", http.StatusOK))
+	app.Get("/route2", stringHandler("route2", http.StatusOK))
 
 	tests := []struct {
 		path           string
@@ -169,8 +170,8 @@ func TestApplication_OverwriteHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
 
-	app.Get("/test", stringHandler("first"))
-	app.Get("/test", stringHandler("second"))
+	app.Get("/test", stringHandler("first", http.StatusOK))
+	app.Get("/test", stringHandler("second", http.StatusOK))
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	rr := httptest.NewRecorder()
@@ -188,17 +189,21 @@ func TestApplication_MiddlewaresApplication(t *testing.T) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
 
-	app.Get("/test", func(w http.ResponseWriter, r *http.Request) {
+	mw := func(next http.Handler) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			r.Header.Set("X-Test", "middleware-applied")
+			next.ServeHTTP(w, r)
+		}
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, err := w.Write([]byte(r.Header.Get("X-Test")))
 		if err != nil {
 			panic(err)
 		}
-	}, func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			r.Header.Set("X-Test", "middleware-applied")
-			next(w, r)
-		}
 	})
+
+	app.Get("/test", handler, mw)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	rr := httptest.NewRecorder()
@@ -217,17 +222,19 @@ func TestApplication_GlobalMiddleware(t *testing.T) {
 	app := NewApplication(mux)
 
 	var called []string
-	globalMw := func(next http.HandlerFunc) http.HandlerFunc {
+	globalMw := func(next http.Handler) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			called = append(called, "global")
-			next(w, r)
+			next.ServeHTTP(w, r)
 		}
 	}
 
-	app.WithGlobalMiddlewares(globalMw)
-	app.Get("/test", func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = append(called, "handler")
 	})
+
+	app.WithGlobalMiddlewares(globalMw)
+	app.Get("/test", handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	rr := httptest.NewRecorder()
@@ -242,7 +249,7 @@ func TestApplication_GlobalMiddleware(t *testing.T) {
 func BenchmarkApplication_Get(b *testing.B) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
-	app.Get("/bench", stringHandler("foo"))
+	app.Get("/bench", stringHandler("foo", http.StatusOK))
 
 	req := httptest.NewRequest("GET", "/bench", nil)
 	b.ResetTimer()
@@ -256,13 +263,13 @@ func BenchmarkApplication_WithMiddleware(b *testing.B) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
 
-	mw := func(next http.HandlerFunc) http.HandlerFunc {
+	mw := func(next http.Handler) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			next(w, r)
+			next.ServeHTTP(w, r)
 		}
 	}
 
-	app.Get("/bench", stringHandler("foo"), mw, mw, mw)
+	app.Get("/bench", stringHandler("foo", http.StatusOK), mw, mw, mw)
 
 	req := httptest.NewRequest("GET", "/bench", nil)
 	b.ResetTimer()
@@ -275,11 +282,11 @@ func BenchmarkApplication_WithMiddleware(b *testing.B) {
 func BenchmarkApplication_AllowedMethods(b *testing.B) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux).(*Application)
-	app.Get("/bench", stringHandler("foo"))
-	app.Post("/bench", stringHandler("bar"))
-	app.Put("/bench", stringHandler("baz"))
-	app.Patch("/bench", stringHandler("qux"))
-	app.Delete("/bench", stringHandler("quux"))
+	app.Get("/bench", stringHandler("foo", http.StatusOK))
+	app.Post("/bench", stringHandler("bar", http.StatusOK))
+	app.Put("/bench", stringHandler("baz", http.StatusOK))
+	app.Patch("/bench", stringHandler("qux", http.StatusOK))
+	app.Delete("/bench", stringHandler("quux", http.StatusOK))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -293,7 +300,7 @@ func TestApplication_MiddlewareInterruption(t *testing.T) {
 	app := NewApplication(mux)
 
 	var called []string
-	interruptMw := func(next http.HandlerFunc) http.HandlerFunc {
+	interruptMw := func(next http.Handler) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			called = append(called, "interrupt")
 			w.WriteHeader(http.StatusUnauthorized)
@@ -301,9 +308,11 @@ func TestApplication_MiddlewareInterruption(t *testing.T) {
 		}
 	}
 
-	app.Get("/test", func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = append(called, "handler")
-	}, interruptMw)
+	})
+
+	app.Get("/test", handler, interruptMw)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	rr := httptest.NewRecorder()
@@ -321,11 +330,13 @@ func TestApplication_ResponseHeaders(t *testing.T) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
 
-	app.Get("/test", func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Custom", "test")
 		w.WriteHeader(http.StatusCreated)
 	})
+
+	app.Get("/test", handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	rr := httptest.NewRecorder()
@@ -346,7 +357,7 @@ func TestApplication_ConcurrentRequests(t *testing.T) {
 	mux := http.NewServeMux()
 	app := NewApplication(mux)
 
-	app.Get("/test", stringHandler("test"))
+	app.Get("/test", stringHandler("test", http.StatusOK))
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
