@@ -5,12 +5,13 @@ import (
 )
 
 type WebApplication interface {
-	Post(path string, handler http.HandlerFunc, mws ...Middleware)
-	Get(path string, handler http.HandlerFunc, mws ...Middleware)
-	Put(path string, handler http.HandlerFunc, mws ...Middleware)
-	Patch(path string, handler http.HandlerFunc, mws ...Middleware)
-	Delete(path string, handler http.HandlerFunc, mws ...Middleware)
+	Post(path string, handler http.Handler, mws ...Middleware)
+	Get(path string, handler http.Handler, mws ...Middleware)
+	Put(path string, handler http.Handler, mws ...Middleware)
+	Patch(path string, handler http.Handler, mws ...Middleware)
+	Delete(path string, handler http.Handler, mws ...Middleware)
 	WithGlobalMiddlewares(mws ...Middleware) WebApplication
+	Group(path string, mws ...Middleware) WebApplication
 }
 
-type Middleware func(handlerFunc http.HandlerFunc) http.HandlerFunc
+type Middleware func(Handler http.Handler) http.HandlerFunc
